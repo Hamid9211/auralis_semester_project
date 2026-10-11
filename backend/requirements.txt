@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlalchemy
+pydantic
+pymupdf
+groq
+pytest
+pytest-cov
+pylint
