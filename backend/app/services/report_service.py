@@ -100,15 +100,12 @@ class ReportService:
 
     async def process(self, job: ReportJob) -> None:
         """Extract, classify and explain one report, updating its status (FR-RA-02)."""
-        async with self._lock:
-            self._repository.update_status(job.report_id, ReportStatus.PROCESSING)
+        await self._set_status(job.report_id, ReportStatus.PROCESSING)
         try:
             text = await asyncio.to_thread(self._extractor.extract, job.pdf_bytes)
         except ExtractionError as exc:
             logger.warning("Report %s failed: %s", job.report_id, exc.message)
-            async with self._lock:
-                self._repository.update_status(job.report_id, ReportStatus.FAILED,
-                                               exc.message)
+            await self._set_status(job.report_id, ReportStatus.FAILED, exc.message)
             return
         values = self._parser.parse(text)
         explanation, source = await self._explain(values, text)
@@ -119,8 +116,7 @@ class ReportService:
 
     async def mark_failed(self, report_id: int, message: str) -> None:
         """Mark a report as failed (used by the worker for unexpected errors)."""
-        async with self._lock:
-            self._repository.update_status(report_id, ReportStatus.FAILED, message)
+        await self._set_status(report_id, ReportStatus.FAILED, message)
 
     async def _explain(self, values: list[LabValue], text: str) -> tuple[str, str]:
         try:
@@ -131,6 +127,11 @@ class ReportService:
             logger.warning("Primary explanation failed (%s); using %s fallback",
                            exc.message, self._fallback.source)
             return self._fallback.explain(values, text), self._fallback.source
+
+    async def _set_status(self, report_id: int, status: ReportStatus,
+                          error_message: str | None = None) -> None:
+        async with self._lock:
+            self._repository.update_status(report_id, status, error_message)
 
     # --- Validation (FR-RA-01, NFR-06) --------------------------------------------
 
