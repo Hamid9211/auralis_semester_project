@@ -1,5 +1,10 @@
 """Engine and session factory creation (the only place that knows the DB driver)."""
 
+# pylint: disable=unsubscriptable-object
+# False positive: Pylint cannot infer that SQLAlchemy's generic sessionmaker
+# supports subscripting (sessionmaker[Session]), which SQLAlchemy 2.x uses for
+# typed session factories.
+
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool

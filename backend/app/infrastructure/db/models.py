@@ -5,6 +5,10 @@ database level, so invalid data is rejected even if a service check is missed
 (defence in depth). Services still validate first and raise domain errors.
 """
 
+# pylint: disable=unsubscriptable-object
+# False positive: Pylint cannot infer that SQLAlchemy's generic Mapped supports
+# subscripting (Mapped[int]), which SQLAlchemy 2.x requires for typed columns.
+
 from datetime import datetime, timezone
 
 from sqlalchemy import (
