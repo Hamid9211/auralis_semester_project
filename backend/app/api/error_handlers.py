@@ -20,21 +20,21 @@ from app.core.logging_config import get_logger
 
 logger = get_logger("api.errors")
 
+STATUS_BY_ERROR: dict[type[AuralisError], int] = {
+    InvalidReadingError: 422,
+    NotFoundError: 404,
+    InvalidFileError: 400,
+    ExtractionError: 422,
+    ExplanationError: 502,
+}
 DEFAULT_STATUS = 500
 
 
-def status_for(exc: AuralisError) -> int:  # pylint: disable=too-many-return-statements
-    """Return the HTTP status for an error."""
-    if isinstance(exc, InvalidReadingError):
-        return 422
-    if isinstance(exc, NotFoundError):
-        return 404
-    if isinstance(exc, InvalidFileError):
-        return 400
-    if isinstance(exc, ExtractionError):
-        return 422
-    if isinstance(exc, ExplanationError):
-        return 502
+def status_for(exc: AuralisError) -> int:
+    """Return the HTTP status for an error, walking up its class hierarchy."""
+    for cls in type(exc).__mro__:
+        if cls in STATUS_BY_ERROR:
+            return STATUS_BY_ERROR[cls]
     return DEFAULT_STATUS
 
 
