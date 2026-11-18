@@ -5,5 +5,10 @@ ignore=.venv
 # Data classes, SQLAlchemy rows and interfaces legitimately have few public methods.
 disable=too-few-public-methods
 
+[DESIGN]
+# Entity dataclasses mirror database records (LabReport has 10 fields), and
+# ReportService holds its injected dependencies plus its queue and lock.
+max-attributes=10
+
 [FORMAT]
 max-line-length=100
