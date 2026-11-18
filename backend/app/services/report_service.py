@@ -13,13 +13,22 @@ Thread-safety strategy (full description in docs/m2/thread-safety.md):
 import asyncio
 import hashlib
 
-from app.core.exceptions import DuplicateReportError, InvalidFileError, NotFoundError
+from app.core.exceptions import (
+    AuralisError,
+    DuplicateReportError,
+    ExplanationError,
+    ExtractionError,
+    InvalidFileError,
+    NotFoundError,
+)
 from app.core.logging_config import get_logger
 from app.domain.lab_reports import (
     ExplanationGenerator,
     LabReport,
     LabReportRepository,
+    LabValue,
     ReportJob,
+    ReportStatus,
     TextExtractor,
 )
 from app.services.lab_value_parser import LabValueParser
@@ -29,10 +38,11 @@ logger = get_logger("reports.service")
 PDF_SIGNATURE = b"%PDF-"
 PDF_EXTENSION = ".pdf"
 MAX_FILENAME_LENGTH = 255
+UNEXPECTED_ERROR_MESSAGE = "An unexpected error occurred while processing the report."
 
 
 class ReportService:
-    """Validates uploads and queues them for background processing."""
+    """Validates uploads, queues them, and processes queued reports."""
 
     def __init__(self, *, repository: LabReportRepository, extractor: TextExtractor,
                  generator: ExplanationGenerator, fallback: ExplanationGenerator,
@@ -86,6 +96,42 @@ class ReportService:
         """Wait until every queued report has been handled."""
         await self._queue.join()
 
+    # --- Processing --------------------------------------------------------------
+
+    async def process(self, job: ReportJob) -> None:
+        """Extract, classify and explain one report, updating its status (FR-RA-02)."""
+        async with self._lock:
+            self._repository.update_status(job.report_id, ReportStatus.PROCESSING)
+        try:
+            text = await asyncio.to_thread(self._extractor.extract, job.pdf_bytes)
+        except ExtractionError as exc:
+            logger.warning("Report %s failed: %s", job.report_id, exc.message)
+            async with self._lock:
+                self._repository.update_status(job.report_id, ReportStatus.FAILED,
+                                               exc.message)
+            return
+        values = self._parser.parse(text)
+        explanation, source = await self._explain(values, text)
+        async with self._lock:
+            self._repository.save_results(job.report_id, values, explanation, source)
+        logger.info("Report %s done: %d values, %s explanation",
+                    job.report_id, len(values), source)
+
+    async def mark_failed(self, report_id: int, message: str) -> None:
+        """Mark a report as failed (used by the worker for unexpected errors)."""
+        async with self._lock:
+            self._repository.update_status(report_id, ReportStatus.FAILED, message)
+
+    async def _explain(self, values: list[LabValue], text: str) -> tuple[str, str]:
+        try:
+            explanation = await asyncio.to_thread(self._generator.explain, values, text)
+            return explanation, self._generator.source
+        except ExplanationError as exc:
+            # NFR-03: the report still gets its values and a template explanation.
+            logger.warning("Primary explanation failed (%s); using %s fallback",
+                           exc.message, self._fallback.source)
+            return self._fallback.explain(values, text), self._fallback.source
+
     # --- Validation (FR-RA-01, NFR-06) --------------------------------------------
 
     def _validate(self, filename: str, data: bytes) -> str:
@@ -107,3 +153,41 @@ class ReportService:
             raise InvalidFileError("The file is not a valid PDF.")
         return name
 
+
+class ReportWorker:
+    """Background task that processes queued reports one after another.
+
+    Several workers can run at once; each one stays alive whatever happens to a
+    single report (NFR-03).
+    """
+
+    def __init__(self, service: ReportService, name: str) -> None:
+        self._service = service
+        self._name = name
+
+    async def run(self) -> None:
+        """Process jobs until the task is cancelled at shutdown."""
+        logger.info("%s started", self._name)
+        while True:
+            job = await self._service.next_job()
+            try:
+                await self._service.process(job)
+            except AuralisError as exc:
+                logger.warning("%s: report %s failed: %s", self._name, job.report_id,
+                               exc.message)
+                await self._fail_quietly(job.report_id, exc.message)
+            except Exception:  # pylint: disable=broad-exception-caught
+                # Last-resort boundary: an unknown error in one report must not
+                # stop the worker. The full traceback is logged.
+                logger.exception("%s: unexpected error on report %s", self._name,
+                                 job.report_id)
+                await self._fail_quietly(job.report_id, UNEXPECTED_ERROR_MESSAGE)
+            finally:
+                self._service.job_done()
+
+    async def _fail_quietly(self, report_id: int, message: str) -> None:
+        try:
+            await self._service.mark_failed(report_id, message)
+        except AuralisError as exc:
+            logger.error("%s: could not mark report %s as failed: %s", self._name,
+                         report_id, exc.message)
