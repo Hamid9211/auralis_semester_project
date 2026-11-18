@@ -1,0 +1,9 @@
+[MAIN]
+ignore=.venv
+
+[MESSAGES CONTROL]
+# Data classes, SQLAlchemy rows and interfaces legitimately have few public methods.
+disable=too-few-public-methods
+
+[FORMAT]
+max-line-length=100
