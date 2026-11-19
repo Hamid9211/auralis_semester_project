@@ -50,10 +50,8 @@ class TimeOfDayLowDetector(TrendDetector):
         lows = [r for r in readings if classify(r.value_mg_dl) is GlucoseLevel.LOW]
         best: list[GlucoseReading] = []
         for start in lows:
-            start_minute = start.measured_at.hour * 60 + start.measured_at.minute
             group = [r for r in lows
-                     if (r.measured_at.hour * 60 + r.measured_at.minute - start_minute)
-                     % MINUTES_PER_DAY <= self._window_minutes]
+                     if _minutes_after(start, r) <= self._window_minutes]
             if len(group) > len(best):
                 best = group
         if len(best) < self._min_count:
@@ -62,3 +60,11 @@ class TimeOfDayLowDetector(TrendDetector):
                    "day (within 3 hours). Consider a snack or ask your doctor about this time.")
         return [Finding(TIME_OF_DAY_LOWS, message, tuple(sorted(r.id for r in best)))]
 
+
+def _minute_of_day(reading: GlucoseReading) -> int:
+    return reading.measured_at.hour * 60 + reading.measured_at.minute
+
+
+def _minutes_after(start: GlucoseReading, other: GlucoseReading) -> int:
+    """Clock minutes from `start` forward to `other`, wrapping past midnight."""
+    return (_minute_of_day(other) - _minute_of_day(start)) % MINUTES_PER_DAY
