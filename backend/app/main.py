@@ -75,6 +75,8 @@ def create_app(settings: Settings | None = None, *,
                                        text_extractor=text_extractor,
                                        explanation_generator=explanation_generator)
         app.state.report_service = service
+        # CA-06: reports cut off by a previous shutdown can never finish.
+        await service.recover_interrupted()
         workers = [
             asyncio.create_task(ReportWorker(service, f"report-worker-{i}").run())
             for i in range(1, REPORT_WORKER_COUNT + 1)

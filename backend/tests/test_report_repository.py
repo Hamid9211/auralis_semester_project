@@ -78,3 +78,47 @@ def test_find_by_patient_returns_newest_first(repo):
 
 def test_find_by_patient_for_patient_without_reports(repo):
     assert not repo.find_by_patient(42)
+
+
+# --- CA-06: reports left unfinished by a restart, and re-upload after failure ---------
+
+INTERRUPTED = "Processing was interrupted. Please upload the file again."
+
+
+def test_fail_unfinished_marks_pending_and_processing_reports_failed(repo):
+    pending = repo.add(PID, "a.pdf", HASH_A)
+    processing = repo.add(PID, "b.pdf", HASH_B)
+    repo.update_status(processing.id, ReportStatus.PROCESSING)
+    done = repo.add(PID, "c.pdf", "c" * 64)
+    repo.save_results(done.id, [], "fine", "template")
+
+    assert repo.fail_unfinished(INTERRUPTED) == 2
+
+    for report_id in (pending.id, processing.id):
+        stored = repo.get(report_id)
+        assert stored.status is ReportStatus.FAILED
+        assert stored.error_message == INTERRUPTED
+    assert repo.get(done.id).status is ReportStatus.DONE
+    assert repo.get(done.id).error_message is None
+
+
+def test_fail_unfinished_without_unfinished_reports_returns_zero(repo):
+    assert repo.fail_unfinished(INTERRUPTED) == 0
+
+
+def test_delete_removes_the_report_and_its_values(repo):
+    report = repo.add(PID, "lab.pdf", HASH_A)
+    values = LabValueParser().parse("HbA1c 6.8 %")
+    repo.save_results(report.id, values, "explained", "template")
+
+    repo.delete(report.id)
+
+    assert repo.get(report.id) is None
+    assert repo.find_by_hash(PID, HASH_A) is None
+    # The UNIQUE(patient_id, file_hash) slot is free again.
+    assert repo.add(PID, "lab.pdf", HASH_A).status is ReportStatus.PENDING
+
+
+def test_delete_unknown_report_raises_not_found(repo):
+    with pytest.raises(NotFoundError):
+        repo.delete(999)
