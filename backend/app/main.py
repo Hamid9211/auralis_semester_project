@@ -16,17 +16,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.error_handlers import register_error_handlers
+from app.api.glucose import router as glucose_router
 from app.api.health import router as health_router
 from app.api.reports import router as reports_router
 from app.core.config import Settings
 from app.core.logging_config import configure_logging, get_logger
 from app.domain.lab_reports import ExplanationGenerator, TextExtractor
 from app.infrastructure.db.init_db import init_database
+from app.infrastructure.db.reading_repository import SqlReadingRepository
 from app.infrastructure.db.report_repository import SqlLabReportRepository
 from app.infrastructure.db.session import create_db_engine, create_session_factory
 from app.infrastructure.explanation_factory import ExplanationGeneratorFactory
 from app.infrastructure.pymupdf_extractor import PyMuPDFTextExtractor
+from app.services.glucose_service import GlucoseService
 from app.services.report_service import ReportService, ReportWorker
+from app.services.trend_detectors import PostMealHighDetector, TimeOfDayLowDetector
+from app.services.trend_service import TrendService
 
 # pylint: disable=unsubscriptable-object
 # False positive on sessionmaker[Session]; see the note in session.py.
@@ -86,6 +91,11 @@ def create_app(settings: Settings | None = None, *,
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = session_factory
+    # M1 and M2: TrendService gets GlucoseService (not the table) and its detector strategies.
+    glucose_service = GlucoseService(SqlReadingRepository(session_factory))
+    app.state.glucose_service = glucose_service
+    app.state.trend_service = TrendService(
+        glucose_service, [PostMealHighDetector(), TimeOfDayLowDetector()])
 
     app.add_middleware(
         CORSMiddleware,
@@ -96,4 +106,5 @@ def create_app(settings: Settings | None = None, *,
     register_error_handlers(app)
     app.include_router(health_router, prefix=API_PREFIX)
     app.include_router(reports_router, prefix=API_PREFIX)
+    app.include_router(glucose_router, prefix=API_PREFIX)
     return app
