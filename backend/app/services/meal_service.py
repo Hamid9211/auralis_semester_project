@@ -4,32 +4,39 @@ Glucose readings are read only through GlucoseService (low coupling, as planned
 in Milestone 1); MealService never touches the glucose table.
 """
 
+from collections import defaultdict
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, time, timedelta, timezone
 
 from app.core.exceptions import InvalidMealError
 from app.core.logging_config import get_logger
+from app.domain.glucose import ReadingContext
 from app.domain.meals import (
+    LINK_WINDOW_MINUTES,
     MAX_ITEMS_PER_MEAL,
     MAX_PORTION,
     MIN_PORTION,
+    DailyTotal,
     Food,
     FoodRepository,
     Meal,
+    MealImpact,
     MealItem,
     MealRepository,
     MealType,
 )
+from app.domain.trends import GlucoseLevel, classify
 from app.services.glucose_service import GlucoseService, as_utc
 
 logger = get_logger("meals.service")
 
 SEARCH_LIMIT = 10
 MAX_SEARCH_LENGTH = 50
+MAX_PERIOD_DAYS = 30
 
 
 class MealService:
-    """Searches foods and logs meals."""
+    """Searches foods, logs meals, and relates meals to glucose."""
 
     def __init__(self, meals: MealRepository, foods: FoodRepository,
                  glucose: GlucoseService) -> None:
@@ -81,3 +88,51 @@ class MealService:
         if food is None:
             raise InvalidMealError(f"Food {food_id} is not in the nutrition table.")
         return MealItem(food=food, portion=portion)
+
+    # --- FR-ML-04 -----------------------------------------------------------------------
+
+    def daily_totals(self, patient_id: int, days: int = 7) -> list[DailyTotal]:
+        """Carbs and calories per day (UTC days), oldest first; days without meals are 0."""
+        self._check_period(days)
+        today = self._glucose.now().date()
+        first_day = today - timedelta(days=days - 1)
+        start = datetime.combine(first_day, time.min, tzinfo=timezone.utc)
+        by_day: dict = defaultdict(list)
+        for meal in self._meals.find_by_patient(patient_id, start=start):
+            by_day[meal.eaten_at.date()].append(meal)
+        totals = []
+        for offset in range(days):
+            day = first_day + timedelta(days=offset)
+            meals = by_day.get(day, [])
+            totals.append(DailyTotal(
+                day=day,
+                carbs_g=round(sum(m.total_carbs_g for m in meals), 1),
+                calories_kcal=round(sum(m.total_calories_kcal for m in meals), 1),
+                meal_count=len(meals)))
+        return totals
+
+    # --- FR-ML-05 -----------------------------------------------------------------------
+
+    def meal_impact(self, patient_id: int, days: int = 7) -> list[MealImpact]:
+        """Each meal of the period with its after-meal reading and a High flag."""
+        self._check_period(days)
+        now = self._glucose.now()
+        start = now - timedelta(days=days)
+        meals = self._meals.find_by_patient(patient_id, start=start, end=now)
+        readings = [r for r in self._glucose.list_readings(patient_id, start=start, end=now)
+                    if r.context is ReadingContext.AFTER_MEAL]
+        impacts = []
+        window = timedelta(minutes=LINK_WINDOW_MINUTES)
+        for meal in meals:
+            candidates = [r for r in readings
+                          if timedelta(0) < r.measured_at - meal.eaten_at <= window]
+            reading = min(candidates, key=lambda r: r.measured_at, default=None)
+            is_high = reading is not None and classify(reading.value_mg_dl) is GlucoseLevel.HIGH
+            impacts.append(MealImpact(meal=meal, reading=reading, is_high=is_high))
+        return impacts
+
+    @staticmethod
+    def _check_period(days: int) -> None:
+        if not 1 <= days <= MAX_PERIOD_DAYS:
+            raise InvalidMealError(f"The period must be 1 to {MAX_PERIOD_DAYS} days.")
+
