@@ -10,7 +10,7 @@ from datetime import datetime, time, timedelta, timezone
 
 from app.core.exceptions import InvalidMealError
 from app.core.logging_config import get_logger
-from app.domain.glucose import ReadingContext
+from app.domain.glucose import GlucoseReading, ReadingContext
 from app.domain.meals import (
     LINK_WINDOW_MINUTES,
     MAX_ITEMS_PER_MEAL,
@@ -122,11 +122,8 @@ class MealService:
         readings = [r for r in self._glucose.list_readings(patient_id, start=start, end=now)
                     if r.context is ReadingContext.AFTER_MEAL]
         impacts = []
-        window = timedelta(minutes=LINK_WINDOW_MINUTES)
         for meal in meals:
-            candidates = [r for r in readings
-                          if timedelta(0) < r.measured_at - meal.eaten_at <= window]
-            reading = min(candidates, key=lambda r: r.measured_at, default=None)
+            reading = _linked_reading(meal, readings)
             is_high = reading is not None and classify(reading.value_mg_dl) is GlucoseLevel.HIGH
             impacts.append(MealImpact(meal=meal, reading=reading, is_high=is_high))
         return impacts
@@ -136,3 +133,10 @@ class MealService:
         if not 1 <= days <= MAX_PERIOD_DAYS:
             raise InvalidMealError(f"The period must be 1 to {MAX_PERIOD_DAYS} days.")
 
+
+def _linked_reading(meal: Meal, readings: Sequence[GlucoseReading]) -> GlucoseReading | None:
+    """The earliest after-meal reading taken after the meal and within the link window."""
+    window = timedelta(minutes=LINK_WINDOW_MINUTES)
+    candidates = [r for r in readings
+                  if timedelta(0) < r.measured_at - meal.eaten_at <= window]
+    return min(candidates, key=lambda r: r.measured_at, default=None)
