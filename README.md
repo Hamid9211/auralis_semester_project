@@ -84,6 +84,6 @@ Dependencies point inwards: `api -> services -> domain <- infrastructure`.
 - `feature/<module>-<short-desc>`: one branch per task, merged into `dev` by pull request after review by another member, using merge commits (no squash).
 - `fix/<short-desc>`: defect fixes, same rules as features.
 - `docs/<short-desc>`: documentation-only changes, same rules.
-- The default branch is `dev`, so pull requests target it. `main` and `dev` are protected: a pull request, one approval and passing CI are required.
+- `main` and `dev` are protected by rulesets: a pull request, one approval and passing CI are required, and force pushes and deletion are blocked. GitHub's default branch is `main`, so set the pull request's base to `dev` by hand.
 
 Every feature is committed test-first: a failing test (`test:`), the code that makes it pass (`feat:`), then any clean-up (`refactor:`).
