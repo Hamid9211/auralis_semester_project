@@ -12,6 +12,9 @@ from fastapi.testclient import TestClient
 from report_fakes import FakeGenerator
 
 from app.core.config import Settings
+from app.domain.lab_reports import ReportStatus
+from app.infrastructure.db.init_db import DEFAULT_PATIENT_ID
+from app.infrastructure.db.report_repository import SqlLabReportRepository
 from app.main import create_app
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -130,3 +133,37 @@ def test_unknown_report_returns_404(client):
 
 def test_report_id_must_be_positive(client):
     assert client.get("/api/reports/0").status_code == 422
+
+
+# --- CA-06: restart recovery and re-upload ---------------------------------------------
+
+INTERRUPTED = "Processing was interrupted. Please upload the file again."
+
+
+def test_unfinished_reports_are_marked_failed_at_startup():
+    settings = Settings(database_url="sqlite://", groq_api_key=None)
+    app = create_app(settings)
+    # Simulate reports left behind by a server that stopped mid-processing.
+    repo = SqlLabReportRepository(app.state.session_factory)
+    pending = repo.add(DEFAULT_PATIENT_ID, "a.pdf", "a" * 64)
+    processing = repo.add(DEFAULT_PATIENT_ID, "b.pdf", "b" * 64)
+    repo.update_status(processing.id, ReportStatus.PROCESSING)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        for report_id in (pending.id, processing.id):
+            body = client.get(f"/api/reports/{report_id}").json()
+            assert body["status"] == "failed"
+            assert body["error_message"] == INTERRUPTED
+
+
+def test_failed_report_can_be_uploaded_again_through_the_api(client):
+    broken = b"%PDF-1.4\nbroken content"
+    first = _upload(client, data=broken).json()
+    assert _wait_until_finished(client, first["id"])["status"] == "failed"
+
+    response = _upload(client, data=broken, name="again.pdf")
+
+    assert response.status_code == 202
+    assert response.json()["id"] != first["id"]
+    ids = [r["id"] for r in client.get("/api/reports").json()]
+    assert ids == [response.json()["id"]]
