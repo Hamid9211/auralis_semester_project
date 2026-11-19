@@ -4,12 +4,14 @@ A web-based diabetes self-management system for patients: log glucose readings, 
 
 Joint semester project for SE423 (Software Construction and Development) and SE431 (Software Quality Assurance), GIKI. Team: Code Wizards.
 
-| Module | Owner |
-|---|---|
-| M1 Glucose Logging | Muhammad Abubakar |
-| M2 Health Trend Analysis | Muhammad Abubakar |
-| M3 Meal and Nutrition Logging | Ahmad Uzair Shah |
-| M4 Medical Report Analyzer | Muhammad Hamid Quyyum |
+| Module | Owner | Status (Milestone 2) |
+|---|---|---|
+| Core architecture (settings, errors, database, CI) | Muhammad Hamid Quyyum | Done |
+| M1 Glucose Logging | Muhammad Abubakar | Done |
+| M2 Health Trend Analysis (Strategy pattern) | Muhammad Abubakar | Done |
+| M3 Meal and Nutrition Logging | Ahmad Uzair Shah | In progress (`feature/meal-logging`) |
+| M4 Medical Report Analyzer (Factory Method, Adapter, async workers) | Muhammad Hamid Quyyum | Done |
+| React frontend | All members | Planned for Milestone 3 |
 
 ## Tech stack
 
@@ -30,7 +32,7 @@ copy ..\.env.example ..\.env    # macOS/Linux: cp ../.env.example ../.env
 uvicorn app.main:create_app --factory --reload
 ```
 
-The API runs at http://localhost:8000 and the interactive docs at http://localhost:8000/docs.
+The API runs at http://localhost:8000/api and the interactive docs at http://localhost:8000/docs.
 `GROQ_API_KEY` in `.env` is optional; without it, lab reports use the template explanation.
 
 ### Tests and static analysis
@@ -38,10 +40,15 @@ The API runs at http://localhost:8000 and the interactive docs at http://localho
 ```bash
 cd backend
 pytest --cov=app --cov-report=term-missing
-pylint app
+pylint app --fail-under=8.0
+pylint --recursive=y tests --rcfile=tests/.pylintrc   # once the static-analysis fixes are merged
 ```
 
-### Frontend
+CI (`.github/workflows/ci.yml`) runs the same checks on every push and pull request.
+
+### Frontend (Milestone 3)
+
+`frontend/` is still empty. Once it is set up:
 
 ```bash
 cd frontend
@@ -54,15 +61,18 @@ npm run dev                      # http://localhost:5173
 ```
 backend/
   app/
-    api/             FastAPI routers, schemas, dependencies, error handlers
+    api/             FastAPI routers, Pydantic schemas, dependencies, error handlers
     core/            settings, logging, exception hierarchy
-    domain/          entities, value objects, interfaces (no framework imports)
-    services/        business logic of the four modules
-    infrastructure/  SQLAlchemy repositories, PyMuPDF and Groq adapters
-    main.py          application factory
-  tests/
-frontend/
+    domain/          dataclasses, enums, interfaces (no framework imports)
+    services/        business rules of the modules
+    infrastructure/  SQLAlchemy repositories, PyMuPDF and Groq adapters, explanation factory
+    main.py          application factory (composition root)
+  tests/             pytest suite; *_fakes.py hold in-memory test doubles; fixtures/ holds sample PDFs
+frontend/            React app (Milestone 3)
 docs/
+  ai-usage-log.md    AI usage log (required by the course guidelines)
+  m2/                Milestone 2 design and quality documents (thread-safety strategy)
+CLAUDE.md            working rules for Claude Code in this repository
 ```
 
 Dependencies point inwards: `api -> services -> domain <- infrastructure`.
@@ -73,5 +83,7 @@ Dependencies point inwards: `api -> services -> domain <- infrastructure`.
 - `dev`: integration branch; must build and pass CI.
 - `feature/<module>-<short-desc>`: one branch per task, merged into `dev` by pull request after review by another member, using merge commits (no squash).
 - `fix/<short-desc>`: defect fixes, same rules as features.
+- `docs/<short-desc>`: documentation-only changes, same rules.
+- The default branch is `dev`, so pull requests target it. `main` and `dev` are protected: a pull request, one approval and passing CI are required.
 
 Every feature is committed test-first: a failing test (`test:`), the code that makes it pass (`feat:`), then any clean-up (`refactor:`).
