@@ -164,6 +164,7 @@ def test_failed_report_can_be_uploaded_again_through_the_api(client):
     response = _upload(client, data=broken, name="again.pdf")
 
     assert response.status_code == 202
-    assert response.json()["id"] != first["id"]
-    ids = [r["id"] for r in client.get("/api/reports").json()]
-    assert ids == [response.json()["id"]]
+    # SQLite may reuse the deleted row's id, so compare by file name instead.
+    reports = client.get("/api/reports").json()
+    assert [r["filename"] for r in reports] == ["again.pdf"]
+    assert reports[0]["id"] == response.json()["id"]
