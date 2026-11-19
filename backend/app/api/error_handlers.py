@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.exceptions import (
     AuralisError,
+    DuplicateReportError,
     ExplanationError,
     ExtractionError,
     InvalidFileError,
@@ -24,6 +25,7 @@ STATUS_BY_ERROR: dict[type[AuralisError], int] = {
     InvalidReadingError: 422,
     NotFoundError: 404,
     InvalidFileError: 400,
+    DuplicateReportError: 409,
     ExtractionError: 422,
     ExplanationError: 502,
 }

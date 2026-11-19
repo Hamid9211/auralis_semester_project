@@ -45,3 +45,9 @@ class ExplanationError(AuralisError):
     """An explanation generator could not produce an explanation."""
 
     code = "explanation_failed"
+
+
+class DuplicateReportError(InvalidFileError):
+    """The same PDF was already uploaded by this patient (FR-RA-01, NFR-04)."""
+
+    code = "duplicate_report"
