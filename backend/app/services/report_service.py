@@ -39,6 +39,7 @@ PDF_SIGNATURE = b"%PDF-"
 PDF_EXTENSION = ".pdf"
 MAX_FILENAME_LENGTH = 255
 UNEXPECTED_ERROR_MESSAGE = "An unexpected error occurred while processing the report."
+INTERRUPTED_MESSAGE = "Processing was interrupted. Please upload the file again."
 
 
 class ReportService:
@@ -64,12 +65,28 @@ class ReportService:
         clean_name = self._validate(filename, data)
         file_hash = hashlib.sha256(data).hexdigest()
         async with self._lock:
-            if self._repository.find_by_hash(patient_id, file_hash) is not None:
-                raise DuplicateReportError("This report has already been uploaded.")
+            existing = self._repository.find_by_hash(patient_id, file_hash)
+            if existing is not None:
+                if existing.status is not ReportStatus.FAILED:
+                    raise DuplicateReportError("This report has already been uploaded.")
+                # CA-06: a failed report may be uploaded again; it replaces the old one.
+                self._repository.delete(existing.id)
             report = self._repository.add(patient_id, clean_name, file_hash)
         await self._queue.put(ReportJob(report_id=report.id, pdf_bytes=bytes(data)))
         logger.info("Report %s (%s) queued", report.id, clean_name)
         return report
+
+    async def recover_interrupted(self) -> int:
+        """Mark reports left unfinished by a restart as failed (CA-06).
+
+        The queue lives in memory and the PDF bytes are not stored, so these
+        reports cannot be re-queued; the patient is asked to upload them again.
+        """
+        async with self._lock:
+            count = self._repository.fail_unfinished(INTERRUPTED_MESSAGE)
+        if count:
+            logger.warning("Marked %d interrupted report(s) as failed", count)
+        return count
 
     def list_reports(self, patient_id: int) -> list[LabReport]:
         """All reports of a patient, newest first (FR-RA-05)."""
