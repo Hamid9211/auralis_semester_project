@@ -36,3 +36,15 @@ Milestone 1 entries are in the appendices of the M1 reports. Milestone 2 entries
 | AI-generated material adopted | `backend/app/domain/glucose.py`, `domain/trends.py`, `services/glucose_service.py`, `services/trend_service.py`, `services/trend_detectors.py`, `infrastructure/db/reading_repository.py`, `api/glucose.py`, `api/glucose_schemas.py`, changes to `main.py` and `db/models.py`, and the M1/M2 tests. |
 | Modifications made | _[Fill in: anything you changed before adopting it, or "None".]_ |
 | Verification performed | Each failing test was run before its implementation and the full suite after it (red-green); boundary tests at 19/20/600/601, 69/70/180/181 and 179/180/181 minutes; Pylint and coverage checked; pull request reviewed by another member. |
+
+
+### Entry M2-5: Meal and Nutrition Logging, module M3 (responsible: Ahmad Uzair Shah)
+
+| Field | Entry |
+|---|---|
+| Tool used | Claude (Anthropic), model Claude Opus 5.5 |
+| Purpose | Generate module M3 following the M1 design: meal domain model, `FoodRepository` and `MealRepository` (separate interfaces), `MealService` (search, log, daily totals, meal-glucose linking through `GlucoseService`), SQL repositories, the nutrition table seed, the meals API, and their tests. |
+| Prompt / activity summary | Asked for M3 exactly as in the M1 class diagram and RTM v1 (FR-ML-01 to FR-ML-05), committed test-first. |
+| AI-generated material adopted | `backend/app/domain/meals.py`, `services/meal_service.py`, `infrastructure/db/meal_repository.py`, `infrastructure/db/nutrition_seed.py`, `api/meals.py`, `api/meal_schemas.py`, changes to `main.py`, `db/models.py`, `db/init_db.py` and `core/exceptions.py`, and the M3 tests. |
+| Modifications made | _[Fill in: anything you changed before adopting it, or "None".]_ |
+| Verification performed | Each failing test was run before its implementation and the full suite after it (red-green); boundary tests on portion (0.4/0.5/3.0/3.1) and the link window (119/120/121 min); nutrition values checked against USDA FoodData Central; Pylint and coverage checked; pull request reviewed by another member. |
