@@ -67,8 +67,17 @@ class InMemoryLabReportRepository(LabReportRepository):
                      explanation=explanation, explanation_source=explanation_source,
                      error_message=None)
 
+    def fail_unfinished(self, message: str) -> int:
+        unfinished = [r.id for r in self._reports.values()
+                      if r.status in (ReportStatus.PENDING, ReportStatus.PROCESSING)]
+        for report_id in unfinished:
+            self._change(report_id, status=ReportStatus.FAILED, error_message=message)
+        return len(unfinished)
+
     def delete(self, report_id: int) -> None:
-        """Test helper: simulate a report disappearing while it is queued."""
+        """Remove a report (also used to simulate a report disappearing while queued)."""
+        if report_id not in self._reports:
+            raise NotFoundError(f"Lab report {report_id} does not exist.")
         del self._reports[report_id]
 
     def _change(self, report_id: int, **changes) -> None:
