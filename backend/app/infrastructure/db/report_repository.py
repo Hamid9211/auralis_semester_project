@@ -9,7 +9,7 @@ called safely from request handlers and from the background workers.
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
@@ -111,6 +111,24 @@ class SqlLabReportRepository(LabReportRepository):
             row.explanation_source = explanation_source
             row.error_message = None
             row.status = ReportStatus.DONE.value
+            session.commit()
+
+    def fail_unfinished(self, message: str) -> int:
+        """Mark reports left pending or processing (e.g. by a restart) as failed."""
+        unfinished = (ReportStatus.PENDING.value, ReportStatus.PROCESSING.value)
+        with self._session_factory() as session:
+            result = session.execute(
+                update(LabReportRow)
+                .where(LabReportRow.status.in_(unfinished))
+                .values(status=ReportStatus.FAILED.value, error_message=message)
+            )
+            session.commit()
+            return result.rowcount
+
+    def delete(self, report_id: int) -> None:
+        """Remove a report; its values are removed by the delete-orphan cascade."""
+        with self._session_factory() as session:
+            session.delete(self._require(session, report_id))
             session.commit()
 
     @staticmethod
