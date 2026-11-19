@@ -51,3 +51,13 @@ class DuplicateReportError(InvalidFileError):
     """The same PDF was already uploaded by this patient (FR-RA-01, NFR-04)."""
 
     code = "duplicate_report"
+
+
+class InvalidMealError(InvalidReadingError):
+    """A meal or food search breaks a business rule (module M3).
+
+    Subclass of InvalidReadingError, so it is reported as HTTP 422 without
+    changing the central error table.
+    """
+
+    code = "invalid_meal"
