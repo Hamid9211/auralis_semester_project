@@ -118,3 +118,51 @@ async def test_list_reports_newest_first(service):
 def test_get_unknown_report_raises_not_found(service):
     with pytest.raises(NotFoundError):
         service.get_report(999)
+
+
+# --- CA-06: interrupted reports and re-upload after failure -------------------------------
+
+INTERRUPTED = "Processing was interrupted. Please upload the file again."
+
+
+async def test_recover_interrupted_marks_unfinished_reports_failed(service, repo):
+    pending = await service.upload(PID, "a.pdf", pdf_bytes("a"))
+    processing = await service.upload(PID, "b.pdf", pdf_bytes("b"))
+    repo.update_status(processing.id, ReportStatus.PROCESSING)
+
+    assert await service.recover_interrupted() == 2
+
+    for report_id in (pending.id, processing.id):
+        stored = repo.get(report_id)
+        assert stored.status is ReportStatus.FAILED
+        assert stored.error_message == INTERRUPTED
+
+
+async def test_recover_interrupted_leaves_finished_reports_alone(service, repo):
+    report = await service.upload(PID, "a.pdf", pdf_bytes("a"))
+    repo.save_results(report.id, [], "fine", "template")
+    assert await service.recover_interrupted() == 0
+    assert repo.get(report.id).status is ReportStatus.DONE
+
+
+async def test_failed_report_can_be_uploaded_again(service, repo):
+    first = await service.upload(PID, "lab.pdf", pdf_bytes())
+    await asyncio.wait_for(service.next_job(), timeout=1)
+    repo.update_status(first.id, ReportStatus.FAILED, INTERRUPTED)
+
+    second = await service.upload(PID, "lab.pdf", pdf_bytes())
+
+    assert second.id != first.id
+    assert second.status is ReportStatus.PENDING
+    assert repo.get(first.id) is None
+    assert [r.id for r in service.list_reports(PID)] == [second.id]
+    job = await asyncio.wait_for(service.next_job(), timeout=1)
+    assert job.report_id == second.id
+
+
+@pytest.mark.parametrize("status", [ReportStatus.PROCESSING, ReportStatus.DONE])
+async def test_unfailed_report_still_blocks_a_duplicate(service, repo, status):
+    first = await service.upload(PID, "lab.pdf", pdf_bytes())
+    repo.update_status(first.id, status)
+    with pytest.raises(DuplicateReportError):
+        await service.upload(PID, "lab.pdf", pdf_bytes())

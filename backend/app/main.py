@@ -18,17 +18,20 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.api.error_handlers import register_error_handlers
 from app.api.glucose import router as glucose_router
 from app.api.health import router as health_router
+from app.api.meals import router as meals_router
 from app.api.reports import router as reports_router
 from app.core.config import Settings
 from app.core.logging_config import configure_logging, get_logger
 from app.domain.lab_reports import ExplanationGenerator, TextExtractor
 from app.infrastructure.db.init_db import init_database
+from app.infrastructure.db.meal_repository import SqlFoodRepository, SqlMealRepository
 from app.infrastructure.db.reading_repository import SqlReadingRepository
 from app.infrastructure.db.report_repository import SqlLabReportRepository
 from app.infrastructure.db.session import create_db_engine, create_session_factory
 from app.infrastructure.explanation_factory import ExplanationGeneratorFactory
 from app.infrastructure.pymupdf_extractor import PyMuPDFTextExtractor
 from app.services.glucose_service import GlucoseService
+from app.services.meal_service import MealService
 from app.services.report_service import ReportService, ReportWorker
 from app.services.trend_detectors import PostMealHighDetector, TimeOfDayLowDetector
 from app.services.trend_service import TrendService
@@ -75,6 +78,8 @@ def create_app(settings: Settings | None = None, *,
                                        text_extractor=text_extractor,
                                        explanation_generator=explanation_generator)
         app.state.report_service = service
+        # CA-06: reports cut off by a previous shutdown can never finish.
+        await service.recover_interrupted()
         workers = [
             asyncio.create_task(ReportWorker(service, f"report-worker-{i}").run())
             for i in range(1, REPORT_WORKER_COUNT + 1)
@@ -96,6 +101,10 @@ def create_app(settings: Settings | None = None, *,
     app.state.glucose_service = glucose_service
     app.state.trend_service = TrendService(
         glucose_service, [PostMealHighDetector(), TimeOfDayLowDetector()])
+    # M3: MealService reads glucose only through GlucoseService.
+    app.state.meal_service = MealService(SqlMealRepository(session_factory),
+                                         SqlFoodRepository(session_factory),
+                                         glucose_service)
 
     app.add_middleware(
         CORSMiddleware,
@@ -107,4 +116,5 @@ def create_app(settings: Settings | None = None, *,
     app.include_router(health_router, prefix=API_PREFIX)
     app.include_router(reports_router, prefix=API_PREFIX)
     app.include_router(glucose_router, prefix=API_PREFIX)
+    app.include_router(meals_router, prefix=API_PREFIX)
     return app
