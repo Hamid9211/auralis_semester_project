@@ -1,0 +1,142 @@
+"""Business rules of module M3 (Meal and Nutrition Logging, FR-ML-01 to FR-ML-05).
+
+Glucose readings are read only through GlucoseService (low coupling, as planned
+in Milestone 1); MealService never touches the glucose table.
+"""
+
+from collections import defaultdict
+from collections.abc import Sequence
+from datetime import datetime, time, timedelta, timezone
+
+from app.core.exceptions import InvalidMealError
+from app.core.logging_config import get_logger
+from app.domain.glucose import GlucoseReading, ReadingContext
+from app.domain.meals import (
+    LINK_WINDOW_MINUTES,
+    MAX_ITEMS_PER_MEAL,
+    MAX_PORTION,
+    MIN_PORTION,
+    DailyTotal,
+    Food,
+    FoodRepository,
+    Meal,
+    MealImpact,
+    MealItem,
+    MealRepository,
+    MealType,
+)
+from app.domain.trends import GlucoseLevel, classify
+from app.services.glucose_service import GlucoseService, as_utc
+
+logger = get_logger("meals.service")
+
+SEARCH_LIMIT = 10
+MAX_SEARCH_LENGTH = 50
+MAX_PERIOD_DAYS = 30
+
+
+class MealService:
+    """Searches foods, logs meals, and relates meals to glucose."""
+
+    def __init__(self, meals: MealRepository, foods: FoodRepository,
+                 glucose: GlucoseService) -> None:
+        self._meals = meals
+        self._foods = foods
+        self._glucose = glucose
+
+    # --- FR-ML-01 ------------------------------------------------------------------
+
+    def search_foods(self, text: str) -> list[Food]:
+        """Up to 10 foods whose name contains the text."""
+        query = (text or "").strip()
+        if not query:
+            raise InvalidMealError("Type at least one character to search.")
+        if len(query) > MAX_SEARCH_LENGTH:
+            raise InvalidMealError(f"Search text is longer than {MAX_SEARCH_LENGTH} characters.")
+        return self._foods.search(query, SEARCH_LIMIT)
+
+    # --- FR-ML-02 / FR-ML-03 ---------------------------------------------------------
+
+    def log_meal(self, patient_id: int, meal_type: MealType, eaten_at: datetime,
+                 items: Sequence[tuple[int, float]]) -> Meal:
+        """Validate and store a meal given as (food_id, portion) pairs."""
+        if not items:
+            raise InvalidMealError("A meal needs at least one food.")
+        if len(items) > MAX_ITEMS_PER_MEAL:
+            raise InvalidMealError(f"A meal can have at most {MAX_ITEMS_PER_MEAL} foods.")
+        eaten_at = as_utc(eaten_at)
+        if eaten_at > self._glucose.now():
+            raise InvalidMealError("A meal cannot be dated in the future.")
+        meal_items = [self._item(food_id, portion) for food_id, portion in items]
+        meal = self._meals.add(patient_id, MealType(meal_type), eaten_at, meal_items)
+        logger.info("Meal %s stored (%d items, %.1f g carbs)", meal.id, len(meal.items),
+                    meal.total_carbs_g)
+        return meal
+
+    def list_meals(self, patient_id: int, start: datetime | None = None,
+                   end: datetime | None = None) -> list[Meal]:
+        """Meals in [start, end], newest first."""
+        return self._meals.find_by_patient(patient_id,
+                                           as_utc(start) if start else None,
+                                           as_utc(end) if end else None)
+
+    def _item(self, food_id: int, portion: float) -> MealItem:
+        if not MIN_PORTION <= portion <= MAX_PORTION:
+            raise InvalidMealError(
+                f"Portion must be between {MIN_PORTION:g} and {MAX_PORTION:g} servings.")
+        food = self._foods.get(food_id)
+        if food is None:
+            raise InvalidMealError(f"Food {food_id} is not in the nutrition table.")
+        return MealItem(food=food, portion=portion)
+
+    # --- FR-ML-04 -----------------------------------------------------------------------
+
+    def daily_totals(self, patient_id: int, days: int = 7) -> list[DailyTotal]:
+        """Carbs and calories per day (UTC days), oldest first; days without meals are 0."""
+        self._check_period(days)
+        today = self._glucose.now().date()
+        first_day = today - timedelta(days=days - 1)
+        start = datetime.combine(first_day, time.min, tzinfo=timezone.utc)
+        by_day: dict = defaultdict(list)
+        for meal in self._meals.find_by_patient(patient_id, start=start):
+            by_day[meal.eaten_at.date()].append(meal)
+        totals = []
+        for offset in range(days):
+            day = first_day + timedelta(days=offset)
+            meals = by_day.get(day, [])
+            totals.append(DailyTotal(
+                day=day,
+                carbs_g=round(sum(m.total_carbs_g for m in meals), 1),
+                calories_kcal=round(sum(m.total_calories_kcal for m in meals), 1),
+                meal_count=len(meals)))
+        return totals
+
+    # --- FR-ML-05 -----------------------------------------------------------------------
+
+    def meal_impact(self, patient_id: int, days: int = 7) -> list[MealImpact]:
+        """Each meal of the period with its after-meal reading and a High flag."""
+        self._check_period(days)
+        now = self._glucose.now()
+        start = now - timedelta(days=days)
+        meals = self._meals.find_by_patient(patient_id, start=start, end=now)
+        readings = [r for r in self._glucose.list_readings(patient_id, start=start, end=now)
+                    if r.context is ReadingContext.AFTER_MEAL]
+        impacts = []
+        for meal in meals:
+            reading = _linked_reading(meal, readings)
+            is_high = reading is not None and classify(reading.value_mg_dl) is GlucoseLevel.HIGH
+            impacts.append(MealImpact(meal=meal, reading=reading, is_high=is_high))
+        return impacts
+
+    @staticmethod
+    def _check_period(days: int) -> None:
+        if not 1 <= days <= MAX_PERIOD_DAYS:
+            raise InvalidMealError(f"The period must be 1 to {MAX_PERIOD_DAYS} days.")
+
+
+def _linked_reading(meal: Meal, readings: Sequence[GlucoseReading]) -> GlucoseReading | None:
+    """The earliest after-meal reading taken after the meal and within the link window."""
+    window = timedelta(minutes=LINK_WINDOW_MINUTES)
+    candidates = [r for r in readings
+                  if timedelta(0) < r.measured_at - meal.eaten_at <= window]
+    return min(candidates, key=lambda r: r.measured_at, default=None)

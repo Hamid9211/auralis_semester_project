@@ -26,16 +26,15 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.domain.glucose import MAX_GLUCOSE_MG_DL, MIN_GLUCOSE_MG_DL, ReadingContext
+from app.domain.meals import MAX_PORTION, MIN_PORTION, MealType
 
-# Glucose rules come from the domain model, so the CHECK constraints and the
+# Glucose and meal rules come from the domain model, so the CHECK constraints and the
 # service validation cannot drift apart.
 READING_CONTEXTS = tuple(context.value for context in ReadingContext)
-MEAL_TYPES = ("breakfast", "lunch", "dinner", "snack")
+MEAL_TYPES = tuple(meal_type.value for meal_type in MealType)
 REPORT_STATUSES = ("pending", "processing", "done", "failed")
 LAB_TESTS = ("hba1c", "fasting_glucose", "ldl_cholesterol", "creatinine")
 
-MIN_PORTION = 0.5
-MAX_PORTION = 3.0
 
 
 def _utc_now() -> datetime:
