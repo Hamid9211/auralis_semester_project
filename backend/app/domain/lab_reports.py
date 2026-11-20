@@ -152,3 +152,11 @@ class LabReportRepository(ABC):
     def save_results(self, report_id: int, values: list[LabValue], explanation: str,
                      explanation_source: str) -> None:
         """Store detected values and the explanation, and mark the report done."""
+
+    @abstractmethod
+    def fail_unfinished(self, message: str) -> int:
+        """Mark every pending or processing report failed; return how many changed."""
+
+    @abstractmethod
+    def delete(self, report_id: int) -> None:
+        """Remove a report and its values; raise NotFoundError if it does not exist."""
