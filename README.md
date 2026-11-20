@@ -9,7 +9,7 @@ Joint semester project for SE423 (Software Construction and Development) and SE4
 | Core architecture (settings, errors, database, CI) | Muhammad Hamid Quyyum | Done |
 | M1 Glucose Logging | Muhammad Abubakar | Done |
 | M2 Health Trend Analysis (Strategy pattern) | Muhammad Abubakar | Done |
-| M3 Meal and Nutrition Logging | Ahmad Uzair Shah | In progress (`feature/meal-logging`) |
+| M3 Meal and Nutrition Logging | Ahmad Uzair Shah | Done |
 | M4 Medical Report Analyzer (Factory Method, Adapter, async workers) | Muhammad Hamid Quyyum | Done |
 | React frontend | All members | Planned for Milestone 3 |
 
