@@ -37,14 +37,13 @@ Milestone 1 entries are in the appendices of the M1 reports. Milestone 2 entries
 | Modifications made | _[Fill in: anything you changed before adopting it, or "None".]_ |
 | Verification performed | Each failing test was run before its implementation and the full suite after it (red-green); boundary tests at 19/20/600/601, 69/70/180/181 and 179/180/181 minutes; Pylint and coverage checked; pull request reviewed by another member. |
 
-
-### Entry M2-5: Meal and Nutrition Logging, module M3 (responsible: Ahmad Uzair Shah)
+### Entry M2-4: CA-06, reports interrupted by a restart (responsible: Muhammad Hamid Quyyum)
 
 | Field | Entry |
 |---|---|
-| Tool used | Claude (Anthropic), model Claude Opus 5.5 |
-| Purpose | Generate module M3 following the M1 design: meal domain model, `FoodRepository` and `MealRepository` (separate interfaces), `MealService` (search, log, daily totals, meal-glucose linking through `GlucoseService`), SQL repositories, the nutrition table seed, the meals API, and their tests. |
-| Prompt / activity summary | Asked for M3 exactly as in the M1 class diagram and RTM v1 (FR-ML-01 to FR-ML-05), committed test-first. |
-| AI-generated material adopted | `backend/app/domain/meals.py`, `services/meal_service.py`, `infrastructure/db/meal_repository.py`, `infrastructure/db/nutrition_seed.py`, `api/meals.py`, `api/meal_schemas.py`, changes to `main.py`, `db/models.py`, `db/init_db.py` and `core/exceptions.py`, and the M3 tests. |
+| Tool used | Claude (Anthropic), model Claude Opus 5.5, in Claude Code |
+| Purpose | Implement corrective action CA-06 from the SE431 report: reports left `pending` or `processing` by a server restart are marked `failed` at start-up, and a file whose earlier report failed can be uploaded again instead of getting 409. |
+| Prompt / activity summary | Asked to continue the M2 handoff and implement CA-06 test-first, keeping the M4 thread-safety strategy (all writes under the service's `asyncio.Lock`). |
+| AI-generated material adopted | `LabReportRepository.fail_unfinished` and `delete` (domain interface and `SqlLabReportRepository`), `ReportService.recover_interrupted` and the re-upload path in `ReportService.upload`, the start-up call in `main.py` lifespan, and the new tests in `test_report_repository.py`, `test_report_upload.py`, `test_reports_api.py` and `report_fakes.py`. |
 | Modifications made | _[Fill in: anything you changed before adopting it, or "None".]_ |
-| Verification performed | Each failing test was run before its implementation and the full suite after it (red-green); boundary tests on portion (0.4/0.5/3.0/3.1) and the link window (119/120/121 min); nutrition values checked against USDA FoodData Central; Pylint and coverage checked; pull request reviewed by another member. |
+| Verification performed | The new tests were run and seen failing (9 failures) before the implementation; afterwards the full suite passed (240 tests, 100% coverage) and Pylint scored 9.99. |
