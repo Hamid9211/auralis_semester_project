@@ -72,7 +72,6 @@ frontend/            React app (Milestone 3)
 docs/
   ai-usage-log.md    AI usage log (required by the course guidelines)
   m2/                Milestone 2 design and quality documents (thread-safety strategy)
-CLAUDE.md            working rules for Claude Code in this repository
 ```
 
 Dependencies point inwards: `api -> services -> domain <- infrastructure`.
