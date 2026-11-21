@@ -44,7 +44,7 @@ async def test_sizes_up_to_the_limit_are_accepted(service, size):
 
 
 async def test_one_byte_over_the_limit_is_rejected(service):
-    with pytest.raises(InvalidFileError, match="larger than 5 MB"):
+    with pytest.raises(InvalidFileError, match="larger than 5 MiB"):
         await service.upload(PID, "lab.pdf", fake_pdf(size=MAX_BYTES + 1))
 
 
