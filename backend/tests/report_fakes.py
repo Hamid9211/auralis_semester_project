@@ -22,7 +22,7 @@ from app.domain.lab_reports import (
 SAMPLE_TEXT = "HbA1c 6.8 %\nFasting glucose 126 mg/dL\nLDL 80\nCreatinine 0.9"
 
 
-def pdf_bytes(tag: str = "sample", size: int = 0) -> bytes:
+def fake_pdf(tag: str = "sample", size: int = 0) -> bytes:
     """Bytes that pass upload validation; a different tag gives a different file."""
     body = f"%PDF-1.4 {tag}".encode()
     return body + b"0" * max(0, size - len(body))
