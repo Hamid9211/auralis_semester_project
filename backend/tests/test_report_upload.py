@@ -1,6 +1,7 @@
 """FR-RA-01 / NFR-06: upload validation (EP + BVA on file type and size) and queueing."""
 
 import asyncio
+import logging
 
 import pytest
 from report_fakes import FakeExtractor, FakeGenerator, InMemoryLabReportRepository, fake_pdf
@@ -196,3 +197,11 @@ async def test_failed_report_is_kept_when_its_replacement_cannot_be_stored():
     assert kept is not None
     assert kept.status is ReportStatus.FAILED
     assert kept.error_message == INTERRUPTED
+
+
+async def test_queued_log_has_the_report_id_but_not_the_file_name(service, caplog):
+    # INS-01 CA-12: file names often contain the patient's name (C6).
+    with caplog.at_level(logging.INFO, logger="auralis"):
+        report = await service.upload(PID, "Ayesha_Khan_lab_report.pdf", fake_pdf())
+    assert f"Report {report.id} queued" in caplog.text
+    assert "Ayesha_Khan" not in caplog.text
