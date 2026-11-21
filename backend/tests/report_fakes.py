@@ -22,7 +22,7 @@ from app.domain.lab_reports import (
 SAMPLE_TEXT = "HbA1c 6.8 %\nFasting glucose 126 mg/dL\nLDL 80\nCreatinine 0.9"
 
 
-def pdf_bytes(tag: str = "sample", size: int = 0) -> bytes:
+def fake_pdf(tag: str = "sample", size: int = 0) -> bytes:
     """Bytes that pass upload validation; a different tag gives a different file."""
     body = f"%PDF-1.4 {tag}".encode()
     return body + b"0" * max(0, size - len(body))
@@ -73,6 +73,18 @@ class InMemoryLabReportRepository(LabReportRepository):
         for report_id in unfinished:
             self._change(report_id, status=ReportStatus.FAILED, error_message=message)
         return len(unfinished)
+
+    def replace_failed(self, report_id: int, patient_id: int, filename: str,
+                       file_hash: str) -> LabReport:
+        """Like the SQL version: the old report is restored if the new one cannot be stored."""
+        if report_id not in self._reports:
+            raise NotFoundError(f"Lab report {report_id} does not exist.")
+        old = self._reports.pop(report_id)
+        try:
+            return self.add(patient_id, filename, file_hash)
+        except Exception:
+            self._reports[report_id] = old
+            raise
 
     def delete(self, report_id: int) -> None:
         """Remove a report (also used to simulate a report disappearing while queued)."""
