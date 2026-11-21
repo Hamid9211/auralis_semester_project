@@ -70,8 +70,12 @@ class ReportService:
                 if existing.status is not ReportStatus.FAILED:
                     raise DuplicateReportError("This report has already been uploaded.")
                 # CA-06: a failed report may be uploaded again; it replaces the old one.
-                self._repository.delete(existing.id)
-            report = self._repository.add(patient_id, clean_name, file_hash)
+                # CA-11: delete and insert are one transaction, so a failed insert
+                # keeps the old report.
+                report = self._repository.replace_failed(existing.id, patient_id,
+                                                         clean_name, file_hash)
+            else:
+                report = self._repository.add(patient_id, clean_name, file_hash)
         await self._queue.put(ReportJob(report_id=report.id, pdf_bytes=bytes(data)))
         logger.info("Report %s (%s) queued", report.id, clean_name)
         return report
