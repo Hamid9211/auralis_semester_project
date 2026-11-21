@@ -77,7 +77,8 @@ class ReportService:
             else:
                 report = self._repository.add(patient_id, clean_name, file_hash)
         await self._queue.put(ReportJob(report_id=report.id, pdf_bytes=bytes(data)))
-        logger.info("Report %s (%s) queued", report.id, clean_name)
+        # CA-12: log only the id; file names can contain a patient's name.
+        logger.info("Report %s queued", report.id)
         return report
 
     async def recover_interrupted(self) -> int:
