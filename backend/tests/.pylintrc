@@ -1,0 +1,13 @@
+# Pylint configuration for the test suite (run: pylint --recursive=y tests --rcfile=tests/.pylintrc)
+[MAIN]
+# Tests import the shared fakes module directly, as pytest does.
+init-hook="import sys; sys.path[:0] = ['.', 'tests']"
+
+[MESSAGES CONTROL]
+# Test functions are named after the behaviour they check (e.g.
+# test_one_byte_over_the_limit_is_rejected); a docstring would repeat the name.
+# Fakes and fixtures legitimately have few public methods.
+disable=missing-function-docstring,too-few-public-methods
+
+[FORMAT]
+max-line-length=100

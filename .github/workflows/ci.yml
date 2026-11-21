@@ -25,6 +25,9 @@ jobs:
       - name: Static analysis (Pylint, threshold from NFR-07)
         run: pylint app --fail-under=8.0
 
+      - name: Static analysis of tests (Pylint)
+        run: pylint --recursive=y tests --rcfile=tests/.pylintrc --fail-under=8.0
+
       - name: Tests with coverage
         run: pytest --cov=app --cov-report=term-missing --cov-report=xml
 
