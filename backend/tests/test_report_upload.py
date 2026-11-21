@@ -88,6 +88,18 @@ async def test_path_in_filename_is_stripped(service):
     assert report.filename == "lab.pdf"
 
 
+@pytest.mark.parametrize("filename", [".pdf", ".PDF", "folder/.pdf"])
+async def test_name_with_nothing_before_the_extension_is_rejected(service, filename):
+    # INS-01 CA-15: boundary just below the shortest valid name (C7).
+    with pytest.raises(InvalidFileError, match="name before"):
+        await service.upload(PID, filename, fake_pdf())
+
+
+async def test_one_character_name_is_accepted(service):
+    report = await service.upload(PID, "a.pdf", fake_pdf())
+    assert report.filename == "a.pdf"
+
+
 async def test_rejected_upload_is_not_stored_or_queued(service, repo):
     with pytest.raises(InvalidFileError):
         await service.upload(PID, "lab.txt", fake_pdf())
