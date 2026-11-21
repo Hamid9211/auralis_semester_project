@@ -12,6 +12,8 @@ from app.services.report_service import UNEXPECTED_ERROR_MESSAGE, ReportService,
 
 PID = 1
 WAIT_SECONDS = 5
+EXPLANATION_FAILED = ("The lab values were read, but no explanation could be generated. "
+                      "Please upload the file again later.")
 
 
 class Harness:
@@ -97,6 +99,20 @@ async def test_llm_failure_falls_back_to_template_and_keeps_values(make_harness)
     assert stored.status is ReportStatus.DONE
     assert stored.explanation_source == "template"
     assert len(stored.values) == 4
+    assert h.generator.calls == 1 and h.fallback.calls == 1
+
+
+async def test_fallback_failure_marks_report_failed_with_a_clear_message(make_harness):
+    # INS-01 CA-14: the fallback path needs its own failure test (C5, C12).
+    h = make_harness(generator=FakeGenerator("llm", fail=True))
+    h.fallback.fail = True
+    report = await h.service.upload(PID, "lab.pdf", fake_pdf())
+    await h.idle()
+    stored = h.service.get_report(report.id)
+    assert stored.status is ReportStatus.FAILED
+    assert stored.error_message == EXPLANATION_FAILED
+    assert h.repo.status_history[report.id][-2:] == [ReportStatus.PROCESSING,
+                                                    ReportStatus.FAILED]
     assert h.generator.calls == 1 and h.fallback.calls == 1
 
 
