@@ -4,7 +4,7 @@ import asyncio
 import threading
 
 import pytest
-from report_fakes import FakeExtractor, FakeGenerator, InMemoryLabReportRepository, pdf_bytes
+from report_fakes import FakeExtractor, FakeGenerator, InMemoryLabReportRepository, fake_pdf
 
 from app.core.exceptions import ExtractionError
 from app.domain.lab_reports import HBA1C, ReportStatus
@@ -60,7 +60,7 @@ async def fixture_make_harness():
 
 async def test_report_goes_pending_processing_done(make_harness):
     h = make_harness()
-    report = await h.service.upload(PID, "lab.pdf", pdf_bytes())
+    report = await h.service.upload(PID, "lab.pdf", fake_pdf())
     await h.idle()
     assert h.repo.status_history[report.id] == [
         ReportStatus.PENDING, ReportStatus.PROCESSING, ReportStatus.DONE]
@@ -68,7 +68,7 @@ async def test_report_goes_pending_processing_done(make_harness):
 
 async def test_done_report_has_values_and_llm_explanation(make_harness):
     h = make_harness()
-    report = await h.service.upload(PID, "lab.pdf", pdf_bytes())
+    report = await h.service.upload(PID, "lab.pdf", fake_pdf())
     await h.idle()
     stored = h.service.get_report(report.id)
     assert {v.test_name for v in stored.values} >= {HBA1C}
@@ -78,7 +78,7 @@ async def test_done_report_has_values_and_llm_explanation(make_harness):
 
 async def test_corrupt_pdf_is_marked_failed_with_reason(make_harness):
     h = make_harness(extractor=FakeExtractor(error=ExtractionError("cannot read PDF")))
-    report = await h.service.upload(PID, "lab.pdf", pdf_bytes())
+    report = await h.service.upload(PID, "lab.pdf", fake_pdf())
     await h.idle()
     stored = h.service.get_report(report.id)
     assert stored.status is ReportStatus.FAILED
@@ -91,7 +91,7 @@ async def test_corrupt_pdf_is_marked_failed_with_reason(make_harness):
 
 async def test_llm_failure_falls_back_to_template_and_keeps_values(make_harness):
     h = make_harness(generator=FakeGenerator("llm", fail=True))
-    report = await h.service.upload(PID, "lab.pdf", pdf_bytes())
+    report = await h.service.upload(PID, "lab.pdf", fake_pdf())
     await h.idle()
     stored = h.service.get_report(report.id)
     assert stored.status is ReportStatus.DONE
@@ -103,10 +103,10 @@ async def test_llm_failure_falls_back_to_template_and_keeps_values(make_harness)
 async def test_worker_keeps_running_after_a_corrupt_pdf(make_harness):
     extractor = FakeExtractor(error=ExtractionError("bad"))
     h = make_harness(extractor=extractor)
-    bad = await h.service.upload(PID, "bad.pdf", pdf_bytes("bad"))
+    bad = await h.service.upload(PID, "bad.pdf", fake_pdf("bad"))
     await h.idle()
     extractor.error = None
-    good = await h.service.upload(PID, "good.pdf", pdf_bytes("good"))
+    good = await h.service.upload(PID, "good.pdf", fake_pdf("good"))
     await h.idle()
     assert h.service.get_report(bad.id).status is ReportStatus.FAILED
     assert h.service.get_report(good.id).status is ReportStatus.DONE
@@ -115,10 +115,10 @@ async def test_worker_keeps_running_after_a_corrupt_pdf(make_harness):
 async def test_unexpected_error_marks_failed_and_worker_survives(make_harness):
     extractor = FakeExtractor(error=RuntimeError("bug in extractor"))
     h = make_harness(extractor=extractor)
-    bad = await h.service.upload(PID, "bad.pdf", pdf_bytes("bad"))
+    bad = await h.service.upload(PID, "bad.pdf", fake_pdf("bad"))
     await h.idle()
     extractor.error = None
-    good = await h.service.upload(PID, "good.pdf", pdf_bytes("good"))
+    good = await h.service.upload(PID, "good.pdf", fake_pdf("good"))
     await h.idle()
     stored = h.service.get_report(bad.id)
     assert stored.status is ReportStatus.FAILED
@@ -129,9 +129,9 @@ async def test_unexpected_error_marks_failed_and_worker_survives(make_harness):
 
 async def test_report_deleted_while_queued_does_not_stop_the_worker(make_harness):
     h = make_harness(workers=0)
-    gone = await h.service.upload(PID, "gone.pdf", pdf_bytes("gone"))
+    gone = await h.service.upload(PID, "gone.pdf", fake_pdf("gone"))
     h.repo.delete(gone.id)
-    kept = await h.service.upload(PID, "kept.pdf", pdf_bytes("kept"))
+    kept = await h.service.upload(PID, "kept.pdf", fake_pdf("kept"))
     h.start_worker()
     await h.idle()
     assert h.service.get_report(kept.id).status is ReportStatus.DONE
@@ -141,7 +141,7 @@ async def test_report_deleted_while_queued_does_not_stop_the_worker(make_harness
 
 async def test_extraction_runs_in_worker_threads_not_the_event_loop(make_harness):
     h = make_harness()
-    await h.service.upload(PID, "lab.pdf", pdf_bytes())
+    await h.service.upload(PID, "lab.pdf", fake_pdf())
     await h.idle()
     assert threading.get_ident() not in h.extractor.thread_ids
 
@@ -151,8 +151,8 @@ async def test_two_workers_extract_two_reports_at_the_same_time(make_harness):
     # if processing were sequential, both reports would fail with BrokenBarrierError.
     extractor = FakeExtractor(barrier=threading.Barrier(2, timeout=WAIT_SECONDS))
     h = make_harness(extractor=extractor, workers=2)
-    first = await h.service.upload(PID, "a.pdf", pdf_bytes("a"))
-    second = await h.service.upload(PID, "b.pdf", pdf_bytes("b"))
+    first = await h.service.upload(PID, "a.pdf", fake_pdf("a"))
+    second = await h.service.upload(PID, "b.pdf", fake_pdf("b"))
     await h.idle()
     assert h.service.get_report(first.id).status is ReportStatus.DONE
     assert h.service.get_report(second.id).status is ReportStatus.DONE
@@ -162,7 +162,7 @@ async def test_two_workers_extract_two_reports_at_the_same_time(make_harness):
 async def test_100_concurrent_uploads_of_one_file_store_it_once(make_harness):
     h = make_harness(workers=2)
     results = await asyncio.gather(
-        *(h.service.upload(PID, f"copy{i}.pdf", pdf_bytes("same")) for i in range(100)),
+        *(h.service.upload(PID, f"copy{i}.pdf", fake_pdf("same")) for i in range(100)),
         return_exceptions=True)
     await h.idle()
     stored = [r for r in results if not isinstance(r, Exception)]
@@ -176,7 +176,7 @@ async def test_100_concurrent_uploads_of_one_file_store_it_once(make_harness):
 async def test_100_concurrent_uploads_are_each_processed_exactly_once(make_harness):
     h = make_harness(workers=3)
     reports = await asyncio.gather(
-        *(h.service.upload(PID, f"r{i}.pdf", pdf_bytes(f"r{i}")) for i in range(100)))
+        *(h.service.upload(PID, f"r{i}.pdf", fake_pdf(f"r{i}")) for i in range(100)))
     await h.idle()
     assert len(h.extractor.calls) == 100
     assert len(set(h.extractor.calls)) == 100
