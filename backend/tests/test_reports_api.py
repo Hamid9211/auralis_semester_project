@@ -40,7 +40,7 @@ def _wait_until_finished(client, report_id) -> dict:
         if body["status"] in ("done", "failed"):
             return body
         time.sleep(0.05)
-    pytest.fail(f"report {report_id} did not finish within {POLL_SECONDS} s")
+    raise AssertionError(f"report {report_id} did not finish within {POLL_SECONDS} s")
 
 
 @pytest.fixture(name="client")
