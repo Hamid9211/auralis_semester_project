@@ -183,8 +183,9 @@ class ReportService:
         if not data:
             raise InvalidFileError("The file is empty.")
         if len(data) > self._max_upload_bytes:
-            limit_mb = self._max_upload_bytes / (1024 * 1024)
-            raise InvalidFileError(f"The file is larger than {limit_mb:g} MB.")
+            # CA-16: the limit is binary (1024 x 1024), so the unit shown is MiB.
+            limit_mib = self._max_upload_bytes / (1024 * 1024)
+            raise InvalidFileError(f"The file is larger than {limit_mib:g} MiB.")
         if not data.startswith(PDF_SIGNATURE):
             raise InvalidFileError("The file is not a valid PDF.")
         return name
