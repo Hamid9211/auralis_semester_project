@@ -3,7 +3,7 @@
 Thread-safety strategy (full description in docs/m2/thread-safety.md):
 1. Worker threads only run text extraction (and the blocking LLM call) on their
    own immutable ReportJob; they share no mutable state.
-2. Every report write (create, status change, results) happens on the event
+2. Every report write (create, replace, status change, results) happens on the event
    loop while holding one asyncio.Lock, so no update is lost or interleaved.
 3. The duplicate check and the insert happen under the same lock, and the
    database UNIQUE(patient_id, file_hash) constraint backs it up.
@@ -40,6 +40,8 @@ PDF_EXTENSION = ".pdf"
 MAX_FILENAME_LENGTH = 255
 UNEXPECTED_ERROR_MESSAGE = "An unexpected error occurred while processing the report."
 INTERRUPTED_MESSAGE = "Processing was interrupted. Please upload the file again."
+EXPLANATION_FAILED_MESSAGE = ("The lab values were read, but no explanation could be "
+                              "generated. Please upload the file again later.")
 
 
 class ReportService:
@@ -70,10 +72,15 @@ class ReportService:
                 if existing.status is not ReportStatus.FAILED:
                     raise DuplicateReportError("This report has already been uploaded.")
                 # CA-06: a failed report may be uploaded again; it replaces the old one.
-                self._repository.delete(existing.id)
-            report = self._repository.add(patient_id, clean_name, file_hash)
+                # CA-11: delete and insert are one transaction, so a failed insert
+                # keeps the old report.
+                report = self._repository.replace_failed(existing.id, patient_id,
+                                                         clean_name, file_hash)
+            else:
+                report = self._repository.add(patient_id, clean_name, file_hash)
         await self._queue.put(ReportJob(report_id=report.id, pdf_bytes=bytes(data)))
-        logger.info("Report %s (%s) queued", report.id, clean_name)
+        # CA-12: log only the id; file names can contain a patient's name.
+        logger.info("Report %s queued", report.id)
         return report
 
     async def recover_interrupted(self) -> int:
@@ -125,7 +132,14 @@ class ReportService:
             await self._set_status(job.report_id, ReportStatus.FAILED, exc.message)
             return
         values = self._parser.parse(text)
-        explanation, source = await self._explain(values, text)
+        try:
+            explanation, source = await self._explain(values, text)
+        except ExplanationError as exc:
+            # CA-14: both the LLM and the template fallback failed.
+            logger.warning("Report %s failed: no explanation (%s)", job.report_id, exc.message)
+            await self._set_status(job.report_id, ReportStatus.FAILED,
+                                   EXPLANATION_FAILED_MESSAGE)
+            return
         async with self._lock:
             self._repository.save_results(job.report_id, values, explanation, source)
         logger.info("Report %s done: %d values, %s explanation",
@@ -143,6 +157,7 @@ class ReportService:
             # NFR-03: the report still gets its values and a template explanation.
             logger.warning("Primary explanation failed (%s); using %s fallback",
                            exc.message, self._fallback.source)
+            # If the fallback also raises ExplanationError, process() marks the report failed.
             return self._fallback.explain(values, text), self._fallback.source
 
     async def _set_status(self, report_id: int, status: ReportStatus,
@@ -162,11 +177,15 @@ class ReportService:
                 f"The file name is longer than {MAX_FILENAME_LENGTH} characters.")
         if not name.lower().endswith(PDF_EXTENSION):
             raise InvalidFileError("Only PDF files can be uploaded.")
+        if not name[:-len(PDF_EXTENSION)].strip():
+            # CA-15: ".pdf" alone has an extension but no name.
+            raise InvalidFileError("The file needs a name before the .pdf extension.")
         if not data:
             raise InvalidFileError("The file is empty.")
         if len(data) > self._max_upload_bytes:
-            limit_mb = self._max_upload_bytes / (1024 * 1024)
-            raise InvalidFileError(f"The file is larger than {limit_mb:g} MB.")
+            # CA-16: the limit is binary (1024 x 1024), so the unit shown is MiB.
+            limit_mib = self._max_upload_bytes / (1024 * 1024)
+            raise InvalidFileError(f"The file is larger than {limit_mib:g} MiB.")
         if not data.startswith(PDF_SIGNATURE):
             raise InvalidFileError("The file is not a valid PDF.")
         return name

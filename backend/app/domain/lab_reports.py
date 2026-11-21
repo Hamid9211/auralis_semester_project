@@ -160,3 +160,11 @@ class LabReportRepository(ABC):
     @abstractmethod
     def delete(self, report_id: int) -> None:
         """Remove a report and its values; raise NotFoundError if it does not exist."""
+
+    @abstractmethod
+    def replace_failed(self, report_id: int, patient_id: int, filename: str,
+                       file_hash: str) -> LabReport:
+        """Replace a failed report with a new pending one in one transaction.
+
+        If the new report cannot be stored, the old one is kept unchanged.
+        """

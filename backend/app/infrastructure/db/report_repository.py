@@ -131,6 +131,23 @@ class SqlLabReportRepository(LabReportRepository):
             session.delete(self._require(session, report_id))
             session.commit()
 
+    def replace_failed(self, report_id: int, patient_id: int, filename: str,
+                       file_hash: str) -> LabReport:
+        """Delete the failed report and insert the new one in a single transaction."""
+        with self._session_factory() as session:
+            session.delete(self._require(session, report_id))
+            # Flush the delete first so the new row can reuse the (patient, hash) slot.
+            session.flush()
+            row = LabReportRow(patient_id=patient_id, filename=filename,
+                               file_hash=file_hash, status=ReportStatus.PENDING.value)
+            session.add(row)
+            try:
+                session.commit()
+            except IntegrityError as exc:
+                session.rollback()
+                raise DuplicateReportError("This report has already been uploaded.") from exc
+            return _to_domain(self._load(session, row.id))
+
     @staticmethod
     def _load(session: Session, report_id: int) -> LabReportRow | None:
         return session.scalars(

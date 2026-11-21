@@ -1,6 +1,7 @@
 """FR-RA-01 / NFR-06: upload validation (EP + BVA on file type and size) and queueing."""
 
 import asyncio
+import logging
 
 import pytest
 from report_fakes import FakeExtractor, FakeGenerator, InMemoryLabReportRepository, fake_pdf
@@ -43,7 +44,7 @@ async def test_sizes_up_to_the_limit_are_accepted(service, size):
 
 
 async def test_one_byte_over_the_limit_is_rejected(service):
-    with pytest.raises(InvalidFileError, match="larger than 5 MB"):
+    with pytest.raises(InvalidFileError, match="larger than 5 MiB"):
         await service.upload(PID, "lab.pdf", fake_pdf(size=MAX_BYTES + 1))
 
 
@@ -85,6 +86,18 @@ async def test_overlong_filename_is_rejected(service):
 async def test_path_in_filename_is_stripped(service):
     report = await service.upload(PID, r"C:\Users\hamid\Desktop\lab.pdf", fake_pdf())
     assert report.filename == "lab.pdf"
+
+
+@pytest.mark.parametrize("filename", [".pdf", ".PDF", "folder/.pdf"])
+async def test_name_with_nothing_before_the_extension_is_rejected(service, filename):
+    # INS-01 CA-15: boundary just below the shortest valid name (C7).
+    with pytest.raises(InvalidFileError, match="name before"):
+        await service.upload(PID, filename, fake_pdf())
+
+
+async def test_one_character_name_is_accepted(service):
+    report = await service.upload(PID, "a.pdf", fake_pdf())
+    assert report.filename == "a.pdf"
 
 
 async def test_rejected_upload_is_not_stored_or_queued(service, repo):
@@ -166,3 +179,41 @@ async def test_unfailed_report_still_blocks_a_duplicate(service, repo, status):
     repo.update_status(first.id, status)
     with pytest.raises(DuplicateReportError):
         await service.upload(PID, "lab.pdf", fake_pdf())
+
+
+class _FlakyAddRepository(InMemoryLabReportRepository):
+    """Repository whose next insert fails, e.g. because the database went away."""
+
+    fail_next_add = False
+
+    def add(self, patient_id: int, filename: str, file_hash: str):
+        if self.fail_next_add:
+            raise RuntimeError("database unavailable")
+        return super().add(patient_id, filename, file_hash)
+
+
+async def test_failed_report_is_kept_when_its_replacement_cannot_be_stored():
+    # INS-01 CA-11: the re-upload must not lose the old report on a failed insert.
+    repo = _FlakyAddRepository()
+    service = ReportService(repository=repo, extractor=FakeExtractor(), generator=FakeGenerator(),
+                            fallback=FakeGenerator("template"), max_upload_bytes=MAX_BYTES)
+    first = await service.upload(PID, "lab.pdf", fake_pdf())
+    await asyncio.wait_for(service.next_job(), timeout=1)
+    repo.update_status(first.id, ReportStatus.FAILED, INTERRUPTED)
+
+    repo.fail_next_add = True
+    with pytest.raises(RuntimeError):
+        await service.upload(PID, "lab.pdf", fake_pdf())
+
+    kept = repo.get(first.id)
+    assert kept is not None
+    assert kept.status is ReportStatus.FAILED
+    assert kept.error_message == INTERRUPTED
+
+
+async def test_queued_log_has_the_report_id_but_not_the_file_name(service, caplog):
+    # INS-01 CA-12: file names often contain the patient's name (C6).
+    with caplog.at_level(logging.INFO, logger="auralis"):
+        report = await service.upload(PID, "Ayesha_Khan_lab_report.pdf", fake_pdf())
+    assert f"Report {report.id} queued" in caplog.text
+    assert "Ayesha_Khan" not in caplog.text

@@ -74,6 +74,18 @@ class InMemoryLabReportRepository(LabReportRepository):
             self._change(report_id, status=ReportStatus.FAILED, error_message=message)
         return len(unfinished)
 
+    def replace_failed(self, report_id: int, patient_id: int, filename: str,
+                       file_hash: str) -> LabReport:
+        """Like the SQL version: the old report is restored if the new one cannot be stored."""
+        if report_id not in self._reports:
+            raise NotFoundError(f"Lab report {report_id} does not exist.")
+        old = self._reports.pop(report_id)
+        try:
+            return self.add(patient_id, filename, file_hash)
+        except Exception:
+            self._reports[report_id] = old
+            raise
+
     def delete(self, report_id: int) -> None:
         """Remove a report (also used to simulate a report disappearing while queued)."""
         if report_id not in self._reports:

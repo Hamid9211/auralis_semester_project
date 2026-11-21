@@ -109,7 +109,7 @@ def test_oversized_upload_returns_400():
     with _client(max_upload_mb=1) as client:
         response = _upload(client, data=b"%PDF-" + b"0" * (1024 * 1024))
     assert response.status_code == 400
-    assert "larger than 1 MB" in response.json()["error"]["message"]
+    assert "larger than 1 MiB" in response.json()["error"]["message"]
 
 
 def test_missing_file_field_returns_422_with_field_name(client):

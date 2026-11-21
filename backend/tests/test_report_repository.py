@@ -122,3 +122,38 @@ def test_delete_removes_the_report_and_its_values(repo):
 def test_delete_unknown_report_raises_not_found(repo):
     with pytest.raises(NotFoundError):
         repo.delete(999)
+
+
+# --- INS-01 CA-11: re-upload replaces a failed report in one transaction -----------
+
+def test_replace_failed_swaps_the_report_in_one_step(repo):
+    old = repo.add(PID, "lab.pdf", HASH_A)
+    repo.update_status(old.id, ReportStatus.FAILED, INTERRUPTED)
+
+    new = repo.replace_failed(old.id, PID, "lab.pdf", HASH_A)
+
+    # SQLite may reuse the freed id, so check the state rather than the id.
+    assert new.status is ReportStatus.PENDING
+    assert new.error_message is None
+    assert repo.find_by_hash(PID, HASH_A) == new
+    assert len(repo.find_by_patient(PID)) == 1
+
+
+def test_replace_failed_keeps_the_old_report_when_the_insert_fails(repo):
+    old = repo.add(PID, "old.pdf", HASH_A)
+    repo.update_status(old.id, ReportStatus.FAILED, INTERRUPTED)
+    repo.add(PID, "other.pdf", HASH_B)
+
+    with pytest.raises(DuplicateReportError):
+        # The insert breaks UNIQUE(patient_id, file_hash), so the transaction rolls back.
+        repo.replace_failed(old.id, PID, "other.pdf", HASH_B)
+
+    kept = repo.get(old.id)
+    assert kept is not None
+    assert kept.status is ReportStatus.FAILED
+    assert kept.error_message == INTERRUPTED
+
+
+def test_replace_failed_of_unknown_report_raises_not_found(repo):
+    with pytest.raises(NotFoundError):
+        repo.replace_failed(999, PID, "lab.pdf", HASH_A)
