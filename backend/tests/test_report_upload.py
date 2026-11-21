@@ -166,3 +166,33 @@ async def test_unfailed_report_still_blocks_a_duplicate(service, repo, status):
     repo.update_status(first.id, status)
     with pytest.raises(DuplicateReportError):
         await service.upload(PID, "lab.pdf", fake_pdf())
+
+
+class _FlakyAddRepository(InMemoryLabReportRepository):
+    """Repository whose next insert fails, e.g. because the database went away."""
+
+    fail_next_add = False
+
+    def add(self, patient_id: int, filename: str, file_hash: str):
+        if self.fail_next_add:
+            raise RuntimeError("database unavailable")
+        return super().add(patient_id, filename, file_hash)
+
+
+async def test_failed_report_is_kept_when_its_replacement_cannot_be_stored():
+    # INS-01 CA-11: the re-upload must not lose the old report on a failed insert.
+    repo = _FlakyAddRepository()
+    service = ReportService(repository=repo, extractor=FakeExtractor(), generator=FakeGenerator(),
+                            fallback=FakeGenerator("template"), max_upload_bytes=MAX_BYTES)
+    first = await service.upload(PID, "lab.pdf", fake_pdf())
+    await asyncio.wait_for(service.next_job(), timeout=1)
+    repo.update_status(first.id, ReportStatus.FAILED, INTERRUPTED)
+
+    repo.fail_next_add = True
+    with pytest.raises(RuntimeError):
+        await service.upload(PID, "lab.pdf", fake_pdf())
+
+    kept = repo.get(first.id)
+    assert kept is not None
+    assert kept.status is ReportStatus.FAILED
+    assert kept.error_message == INTERRUPTED
