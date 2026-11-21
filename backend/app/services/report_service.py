@@ -3,7 +3,7 @@
 Thread-safety strategy (full description in docs/m2/thread-safety.md):
 1. Worker threads only run text extraction (and the blocking LLM call) on their
    own immutable ReportJob; they share no mutable state.
-2. Every report write (create, status change, results) happens on the event
+2. Every report write (create, replace, status change, results) happens on the event
    loop while holding one asyncio.Lock, so no update is lost or interleaved.
 3. The duplicate check and the insert happen under the same lock, and the
    database UNIQUE(patient_id, file_hash) constraint backs it up.
