@@ -177,6 +177,9 @@ class ReportService:
                 f"The file name is longer than {MAX_FILENAME_LENGTH} characters.")
         if not name.lower().endswith(PDF_EXTENSION):
             raise InvalidFileError("Only PDF files can be uploaded.")
+        if not name[:-len(PDF_EXTENSION)].strip():
+            # CA-15: ".pdf" alone has an extension but no name.
+            raise InvalidFileError("The file needs a name before the .pdf extension.")
         if not data:
             raise InvalidFileError("The file is empty.")
         if len(data) > self._max_upload_bytes:
