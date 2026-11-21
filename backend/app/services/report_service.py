@@ -40,6 +40,8 @@ PDF_EXTENSION = ".pdf"
 MAX_FILENAME_LENGTH = 255
 UNEXPECTED_ERROR_MESSAGE = "An unexpected error occurred while processing the report."
 INTERRUPTED_MESSAGE = "Processing was interrupted. Please upload the file again."
+EXPLANATION_FAILED_MESSAGE = ("The lab values were read, but no explanation could be "
+                              "generated. Please upload the file again later.")
 
 
 class ReportService:
@@ -130,7 +132,14 @@ class ReportService:
             await self._set_status(job.report_id, ReportStatus.FAILED, exc.message)
             return
         values = self._parser.parse(text)
-        explanation, source = await self._explain(values, text)
+        try:
+            explanation, source = await self._explain(values, text)
+        except ExplanationError as exc:
+            # CA-14: both the LLM and the template fallback failed.
+            logger.warning("Report %s failed: no explanation (%s)", job.report_id, exc.message)
+            await self._set_status(job.report_id, ReportStatus.FAILED,
+                                   EXPLANATION_FAILED_MESSAGE)
+            return
         async with self._lock:
             self._repository.save_results(job.report_id, values, explanation, source)
         logger.info("Report %s done: %d values, %s explanation",
@@ -148,6 +157,7 @@ class ReportService:
             # NFR-03: the report still gets its values and a template explanation.
             logger.warning("Primary explanation failed (%s); using %s fallback",
                            exc.message, self._fallback.source)
+            # If the fallback also raises ExplanationError, process() marks the report failed.
             return self._fallback.explain(values, text), self._fallback.source
 
     async def _set_status(self, report_id: int, status: ReportStatus,
